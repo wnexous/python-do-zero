@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { motion } from "motion/react";
-import { Check, ChevronRight, Sparkles, Clock } from "lucide-react";
+import { Check, ChevronRight, Sparkles, Clock, Github, Heart } from "lucide-react";
 import { CURSO, TODAS_LICOES } from "@/content/curso";
 import { useProgresso } from "@/components/progress-provider";
 import { Terminal } from "@/components/code/terminal";
@@ -163,8 +163,44 @@ export function Home() {
           ))}
         </div>
 
+        {/* crédito do criador */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true, amount: 0.4 }}
+          transition={{ duration: 0.5 }}
+          className="mt-16"
+        >
+          <a
+            href="https://github.com/wnexous"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="group flex items-center gap-4 rounded-2xl border border-border/70 bg-card/40 p-4 transition-all hover:border-primary/40 hover:bg-card sm:p-5"
+          >
+            <img
+              src="https://avatars.githubusercontent.com/u/87741591?v=4"
+              alt="Foto de perfil do Andre Dal Negro"
+              width={64}
+              height={64}
+              loading="lazy"
+              className="size-16 shrink-0 rounded-full object-cover ring-2 ring-primary/40 ring-offset-2 ring-offset-background transition-all group-hover:ring-primary"
+            />
+            <div className="min-w-0 flex-1">
+              <p className="flex items-center gap-1.5 text-[11px] uppercase tracking-wide text-muted-foreground">
+                <Heart className="size-3 fill-rose text-rose" /> feito com carinho por
+              </p>
+              <p className="font-serif text-xl text-foreground">Andre Dal Negro</p>
+              <p className="flex items-center gap-1.5 text-sm text-muted-foreground transition-colors group-hover:text-primary">
+                <Github className="size-4" />
+                github.com/wnexous
+              </p>
+            </div>
+            <ChevronRight className="size-5 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:text-primary" />
+          </a>
+        </motion.div>
+
         {/* rodapé */}
-        <footer className="mt-16 border-t border-border/60 pt-8 text-center text-sm text-muted-foreground">
+        <footer className="mt-8 border-t border-border/60 pt-8 text-center text-sm text-muted-foreground">
           <p>
             Feito com 🐍 e paciência. Programar é só dar ordem pro computador —
             e ele <em>adora</em> obedecer.
