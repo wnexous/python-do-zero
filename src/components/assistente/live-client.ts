@@ -1,6 +1,6 @@
 "use client";
 
-import { GoogleGenAI, type Session } from "@google/genai";
+import { GoogleGenAI, Modality, type Session } from "@google/genai";
 import { FERRAMENTAS } from "./ferramentas";
 
 // ============================================================================
@@ -18,7 +18,8 @@ export type StatusChamada = "idle" | "connecting" | "live" | "erro";
 type Callbacks = {
   onStatus: (s: StatusChamada, msg?: string) => void;
   onFalaProfessor?: (texto: string) => void; // transcrição do que o professor diz
-  onCameraStream?: (stream: MediaStream | null) => void;
+  onFalaAluno?: (texto: string) => void; // transcrição do que o aluno diz
+  onCameraStream?: (stream: MediaStream | null, frontal: boolean) => void;
   // o professor chamou uma ferramenta (rolar, navegar, desenhar...) — execute e devolva o resultado
   onToolCall?: (nome: string, args: Record<string, unknown>) => Promise<string>;
 };
@@ -107,11 +108,22 @@ export class LiveSessao {
   public mudo = false;
   public cameraLigada = false;
 
+  // reconexão / continuidade
+  private encerrado = false;
+  private reconectando = false;
+  private resumeHandle: string | null = null;
+  private systemInstruction = "";
+  private tentativas = 0;
+
   constructor(cb: Callbacks) {
     this.cb = cb;
   }
 
   async iniciar(systemInstruction: string, comCamera: boolean) {
+    this.encerrado = false;
+    this.resumeHandle = null;
+    this.tentativas = 0;
+    this.systemInstruction = systemInstruction;
     this.cb.onStatus("connecting");
     try {
       // 1) áudio e microfone PRIMEIRO, ainda dentro do gesto do usuário
@@ -122,38 +134,10 @@ export class LiveSessao {
         audio: { echoCancellation: true, noiseSuppression: true, channelCount: 1 },
       });
 
-      // 2) token efêmero
-      const r = await fetch("/api/live-token", { method: "POST" });
-      const data = await r.json();
-      if (!r.ok || !data.token) {
-        this.cb.onStatus("erro", data?.mensagem ?? "Não consegui abrir a ligação.");
-        await this.encerrar();
-        return;
-      }
-      const ai = new GoogleGenAI({
-        apiKey: data.token,
-        httpOptions: { apiVersion: "v1alpha" },
-      });
+      // 2) conecta na Live API (token + sessão)
+      await this.conectar();
 
-      // 3) conecta na Live API
-      this.session = await ai.live.connect({
-        model: data.model || "gemini-3.1-flash-live-preview",
-        config: {
-          inputAudioTranscription: {},
-          outputAudioTranscription: {},
-          systemInstruction: { parts: [{ text: systemInstruction }] },
-          tools: [{ functionDeclarations: FERRAMENTAS }],
-        },
-        callbacks: {
-          onopen: () => {},
-          onmessage: (m: unknown) => this.aoReceber(m),
-          onerror: (e: { message?: string }) =>
-            this.cb.onStatus("erro", e?.message ?? "Erro na ligação."),
-          onclose: () => this.cb.onStatus("idle"),
-        },
-      });
-
-      // 4) liga o microfone capturado no pipeline PCM 16kHz -> envia
+      // 3) liga o microfone capturado no pipeline PCM 16kHz -> envia
       this.inputCtx = new AudioContext({ sampleRate: 16000 });
       if (this.inputCtx.state === "suspended") await this.inputCtx.resume();
       await this.inputCtx.audioWorklet.addModule("/assistente/capture-worklet.js");
@@ -185,6 +169,76 @@ export class LiveSessao {
     }
   }
 
+  // abre (ou reabre) a sessão da Live API. Usa um token novo a cada vez e,
+  // se já existir um handle de retomada, continua a MESMA conversa.
+  private async conectar() {
+    const r = await fetch("/api/live-token", { method: "POST" });
+    const data = await r.json();
+    if (!r.ok || !data.token) {
+      throw new Error(data?.mensagem ?? "não consegui o token");
+    }
+    const ai = new GoogleGenAI({
+      apiKey: data.token,
+      httpOptions: { apiVersion: "v1alpha" },
+    });
+    this.session = await ai.live.connect({
+      model: data.model || "gemini-3.1-flash-live-preview",
+      config: {
+        responseModalities: [Modality.AUDIO],
+        temperature: 0.85,
+        inputAudioTranscription: {},
+        outputAudioTranscription: {},
+        systemInstruction: { parts: [{ text: this.systemInstruction }] },
+        tools: [{ functionDeclarations: FERRAMENTAS }],
+        // retomada: mantém o contexto se a conexão cair
+        sessionResumption: this.resumeHandle
+          ? { handle: this.resumeHandle }
+          : {},
+      },
+      callbacks: {
+        onopen: () => {},
+        onmessage: (m: unknown) => this.aoReceber(m),
+        onerror: (e: { message?: string }) =>
+          console.error("[live] erro", e?.message),
+        onclose: () => this.aoFechar(),
+      },
+    });
+  }
+
+  // a conexão fechou. Se não foi o usuário que encerrou, tenta reconectar
+  // (a sessão da Live API tem tempo limite — reconectar mantém a aula viva).
+  private aoFechar() {
+    if (this.encerrado) {
+      this.cb.onStatus("idle");
+      return;
+    }
+    void this.reconectar();
+  }
+
+  private async reconectar() {
+    if (this.encerrado || this.reconectando) return;
+    this.reconectando = true;
+    this.tentativas += 1;
+    if (this.tentativas > 6) {
+      this.cb.onStatus("erro", "A ligação caiu e não reconectou. Tenta de novo 🙏");
+      await this.encerrar();
+      return;
+    }
+    this.cb.onStatus("connecting");
+    await new Promise((res) => setTimeout(res, Math.min(500 * this.tentativas, 3000)));
+    if (this.encerrado) return;
+    try {
+      await this.conectar();
+      this.reconectando = false;
+      this.tentativas = 0;
+      this.cb.onStatus("live");
+    } catch (e) {
+      console.error("[live] reconectar falhou", e);
+      this.reconectando = false;
+      void this.reconectar();
+    }
+  }
+
   private aoReceber(m: unknown) {
     const msg = m as {
       data?: string;
@@ -193,18 +247,34 @@ export class LiveSessao {
           parts?: Array<{ inlineData?: { data?: string; mimeType?: string }; text?: string }>;
         };
         outputTranscription?: { text?: string };
+        inputTranscription?: { text?: string };
         interrupted?: boolean;
       };
       toolCall?: {
         functionCalls?: Array<{ id?: string; name?: string; args?: Record<string, unknown> }>;
       };
+      sessionResumptionUpdate?: { resumable?: boolean; newHandle?: string };
+      goAway?: { timeLeft?: string };
     };
     const sc = msg.serverContent;
+
+    // guarda o "handle" pra retomar a conversa se a conexão cair
+    if (msg.sessionResumptionUpdate?.resumable && msg.sessionResumptionUpdate.newHandle) {
+      this.resumeHandle = msg.sessionResumptionUpdate.newHandle;
+    }
+    // servidor avisou que vai desconectar em breve -> reconecta proativamente
+    if (msg.goAway) {
+      void this.reconectar();
+    }
 
     // o professor chamou uma ferramenta (rolar, navegar, quadro...)
     if (msg.toolCall?.functionCalls?.length) {
       void this.tratarFerramentas(msg.toolCall.functionCalls);
     }
+
+    // transcrição do que o ALUNO falou (pra memória/continuidade)
+    const ta = sc?.inputTranscription?.text;
+    if (ta && this.cb.onFalaAluno) this.cb.onFalaAluno(ta);
 
     // o professor foi interrompido (aluno começou a falar) -> corta o áudio
     if (sc?.interrupted) this.reprodutor?.limpar();
@@ -244,7 +314,7 @@ export class LiveSessao {
       return;
     }
     this.cameraLigada = true;
-    this.cb.onCameraStream?.(this.camStream);
+    this.cb.onCameraStream?.(this.camStream, this.facing === "user");
 
     this.videoEl = document.createElement("video");
     this.videoEl.srcObject = this.camStream;
@@ -264,7 +334,7 @@ export class LiveSessao {
     this.camStream?.getTracks().forEach((t) => t.stop());
     this.camStream = null;
     this.videoEl = null;
-    this.cb.onCameraStream?.(null);
+    this.cb.onCameraStream?.(null, true);
   }
 
   private enviarFrame() {
@@ -333,17 +403,19 @@ export class LiveSessao {
       this.videoEl.srcObject = this.camStream;
       await this.videoEl.play().catch(() => {});
     }
-    this.cb.onCameraStream?.(this.camStream);
+    this.cb.onCameraStream?.(this.camStream, this.facing === "user");
   }
 
-  /** avisa o professor do que o aluno está vendo agora (sem forçar resposta) */
+  /**
+   * Alimenta o professor com o que está na tela / o que o aluno sublinhou.
+   * Vai pelo canal REALTIME (não pelo sendClientContent), porque misturar
+   * sendClientContent com áudio deixava o modelo "preso" e ele parava de
+   * responder. Por realtime ele absorve como contexto sem travar a conversa.
+   */
   enviarContexto(texto: string) {
     if (!this.session) return;
     try {
-      this.session.sendClientContent({
-        turns: [{ role: "user", parts: [{ text: texto }] }],
-        turnComplete: false,
-      });
+      this.session.sendRealtimeInput({ text: texto });
     } catch {
       /* noop */
     }
@@ -355,6 +427,8 @@ export class LiveSessao {
   }
 
   async encerrar() {
+    this.encerrado = true;
+    this.reconectando = false;
     if (this.frameTimer) clearInterval(this.frameTimer);
     this.frameTimer = null;
     try {
@@ -365,7 +439,7 @@ export class LiveSessao {
     }
     this.micStream?.getTracks().forEach((t) => t.stop());
     this.camStream?.getTracks().forEach((t) => t.stop());
-    this.cb.onCameraStream?.(null);
+    this.cb.onCameraStream?.(null, true);
     try {
       await this.inputCtx?.close();
     } catch {

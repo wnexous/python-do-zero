@@ -307,6 +307,7 @@ function CallDock() {
     chamadaMsg,
     mudo,
     cameraLigada,
+    cameraFrontal,
     camStream,
     falaProfessor,
     encerrarChamada,
@@ -374,7 +375,10 @@ function CallDock() {
               autoPlay
               playsInline
               muted
-              className="h-16 w-12 -scale-x-100 rounded-lg border border-border object-cover"
+              className={cn(
+                "h-16 w-12 rounded-lg border border-border object-cover",
+                cameraFrontal && "-scale-x-100"
+              )}
             />
           )}
         </div>

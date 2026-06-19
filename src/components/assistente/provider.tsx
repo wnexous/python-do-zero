@@ -43,6 +43,7 @@ type Ctx = {
   chamadaMsg?: string;
   mudo: boolean;
   cameraLigada: boolean;
+  cameraFrontal: boolean;
   camStream: MediaStream | null;
   falaProfessor: string;
   iniciarChamada: (comCamera?: boolean) => Promise<void>;
@@ -57,7 +58,7 @@ type Ctx = {
 const AssistenteCtx = createContext<Ctx | null>(null);
 const CHAVE = "python-do-zero:chat";
 
-function montarPersonaVoz(ctx: ContextoPagina): string {
+function montarPersonaVoz(ctx: ContextoPagina, memoria?: string): string {
   const partes: string[] = [
     `Você é o "Pyto", um professor de Python super gente boa numa LIGAÇÃO DE VOZ ao vivo com um aluno que está começando do zero (nível "explica pra criança").`,
     `Regras da ligação:`,
@@ -75,16 +76,26 @@ function montarPersonaVoz(ctx: ContextoPagina): string {
     `- destacar_trecho: sublinhe na tela a frase/palavra exata que você está comentando ("olha bem AQUI ó").`,
     `- ir_para_licao: leve o aluno pra outra lição quando o assunto estiver melhor explicado lá, ou se ele pedir.`,
     `- abrir_quadro + quadro_fluxo / quadro_passos / quadro_codigo / quadro_comparacao: abra uma lousa e DESENHE pra explicar de forma visual (fluxogramas, passo a passo, exemplos de código, comparações). Use bastante isso — é muito mais didático que só falar. Feche com fechar_quadro quando não precisar mais.`,
-    `- Seja proativo com as ferramentas: ao explicar um conceito, já destaque na tela ou desenhe um quadro. Mas continue falando normalmente enquanto faz isso.`,
+    `- SEJA PROATIVO E AJA, não só fale: ao explicar QUALQUER conceito, já chame uma ferramenta — destaque o trecho na tela, role até a parte certa, ou abra um quadro e desenhe. Não peça permissão ("posso te mostrar?"), simplesmente faça e vá narrando. Use as ferramentas o tempo todo; uma aula sua quase sempre mexe na tela do aluno.`,
+    `- Se o aluno pedir pra ver/ir/mostrar algo, use a ferramenta correspondente na hora. Se uma ferramenta falhar (você recebe o resultado dela), tente outra abordagem.`,
   ];
   if (ctx.licaoTitulo) partes.push(`\nAgora o aluno está na lição: "${ctx.licaoTitulo}".`);
   if (ctx.secaoVisivel) partes.push(`Seção visível na tela: "${ctx.secaoVisivel}".`);
   if (ctx.progresso) partes.push(`Progresso: ${ctx.progresso}.`);
   if (ctx.licaoTexto)
     partes.push(`\nConteúdo da lição (pra você ter o assunto na mão):\n"""${ctx.licaoTexto.slice(0, 5000)}"""`);
-  partes.push(`\nCumprimente rapidinho e pergunte no que pode ajudar.`);
+  if (memoria && memoria.trim()) {
+    partes.push(
+      `\n--- O QUE VOCÊS JÁ CONVERSARAM (memória, pra manter continuidade — NÃO repita, só use de base) ---\n${memoria.trim()}`
+    );
+  }
+  partes.push(
+    `\nSe já conversaram antes, retome com naturalidade ("voltando ao que a gente tava vendo..."). Senão, cumprimente rapidinho e pergunte no que pode ajudar.`
+  );
   return partes.join("\n");
 }
+
+const CHAVE_MEMORIA = "python-do-zero:call-memory";
 
 let _id = 0;
 function novoId() {
@@ -98,18 +109,23 @@ export function AssistenteProvider({ children }: { children: React.ReactNode }) 
   const { concluidas } = useProgresso();
   const concluidasRef = useRef(0);
   concluidasRef.current = concluidas.size;
+  const mensagensRef = useRef<ChatMsg[]>([]);
 
   const [aberto, setAberto] = useState(false);
   const [mensagens, setMensagens] = useState<ChatMsg[]>([]);
   const [enviando, setEnviando] = useState(false);
   const [carregado, setCarregado] = useState(false);
+  mensagensRef.current = mensagens;
 
   // ---- ligação ao vivo ----
   const sessaoRef = useRef<LiveSessao | null>(null);
+  const transcricaoRef = useRef("");
+  const ultimoFalanteRef = useRef<"aluno" | "prof" | null>(null);
   const [chamadaStatus, setChamadaStatus] = useState<StatusChamada>("idle");
   const [chamadaMsg, setChamadaMsg] = useState<string | undefined>();
   const [mudo, setMudo] = useState(false);
   const [cameraLigada, setCameraLigada] = useState(false);
+  const [cameraFrontal, setCameraFrontal] = useState(true);
   const [camStream, setCamStream] = useState<MediaStream | null>(null);
   const [falaProfessor, setFalaProfessor] = useState("");
   const [quadro, setQuadro] = useState<QuadroDados | null>(null);
@@ -238,70 +254,92 @@ export function AssistenteProvider({ children }: { children: React.ReactNode }) 
         if (match) imagem = { mime: match[1], data: match[2] };
       }
 
+      const atualizarBot = (texto: string, pendente: boolean) =>
+        setMensagens((prev) =>
+          prev.map((m) => (m.id === idBot ? { ...m, texto, pendente } : m))
+        );
+
       try {
-        const res = await fetch("/api/chat", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            mensagens: historico,
-            imagem,
-            contexto: pegarContexto(),
-          }),
-        });
-
-        if (!res.ok || !res.body) {
-          const txt = await res.text().catch(() => "");
-          setMensagens((prev) =>
-            prev.map((m) =>
-              m.id === idBot
-                ? {
-                    ...m,
-                    pendente: false,
-                    texto: txt || "Deu um probleminha aqui. Tenta de novo 🙏",
-                  }
-                : m
-            )
-          );
-          return;
-        }
-
-        const reader = res.body.getReader();
         const dec = new TextDecoder();
+        const continuacoes: Array<{
+          calls: Array<{ id?: string; name: string; args?: Record<string, unknown> }>;
+          results: Array<{ id?: string; name: string; result: string }>;
+        }> = [];
         let acc = "";
-        for (;;) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          acc += dec.decode(value, { stream: true });
-          setMensagens((prev) =>
-            prev.map((m) =>
-              m.id === idBot ? { ...m, texto: acc, pendente: true } : m
-            )
+
+        // laço agêntico: o professor pode chamar ferramentas e continuar
+        for (let rodada = 0; rodada < 5; rodada++) {
+          const res = await fetch("/api/chat", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              mensagens: historico,
+              imagem,
+              contexto: pegarContexto(),
+              continuacoes,
+            }),
+          });
+
+          if (!res.ok || !res.body) {
+            const txt = await res.text().catch(() => "");
+            acc = acc || txt || "Deu um probleminha aqui. Tenta de novo 🙏";
+            break;
+          }
+
+          const reader = res.body.getReader();
+          let buf = "";
+          let chamadas: Array<{
+            id?: string;
+            name: string;
+            args?: Record<string, unknown>;
+          }> = [];
+
+          for (;;) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buf += dec.decode(value, { stream: true });
+            const linhas = buf.split("\n");
+            buf = linhas.pop() ?? "";
+            for (const ln of linhas) {
+              const s = ln.trim();
+              if (!s) continue;
+              let ev: { type?: string; v?: string; calls?: typeof chamadas };
+              try {
+                ev = JSON.parse(s);
+              } catch {
+                continue;
+              }
+              if (ev.type === "text" && ev.v) {
+                acc += ev.v;
+                atualizarBot(acc, true);
+              } else if (ev.type === "calls" && ev.calls) {
+                chamadas = ev.calls;
+              }
+            }
+          }
+
+          if (chamadas.length === 0) break;
+
+          // executa as ferramentas no navegador e volta os resultados pro modelo
+          const results = await Promise.all(
+            chamadas.map(async (c) => ({
+              id: c.id,
+              name: c.name,
+              result: await executarFerramenta(c.name, c.args ?? {}),
+            }))
           );
+          continuacoes.push({ calls: chamadas, results });
+          imagem = null; // imagem só na primeira rodada
         }
-        setMensagens((prev) =>
-          prev.map((m) =>
-            m.id === idBot
-              ? { ...m, texto: acc || "(sem resposta)", pendente: false }
-              : m
-          )
-        );
+
+        atualizarBot(acc || "(pronto ✨)", false);
       } catch {
-        setMensagens((prev) =>
-          prev.map((m) =>
-            m.id === idBot
-              ? {
-                  ...m,
-                  pendente: false,
-                  texto: "Sem conexão com a IA. Tenta de novo daqui a pouco.",
-                }
-              : m
-          )
-        );
+        atualizarBot("Sem conexão com a IA. Tenta de novo daqui a pouco.", false);
       } finally {
         setEnviando(false);
       }
     },
-    [enviando, mensagens, pegarContexto]
+    [enviando, mensagens, pegarContexto, executarFerramenta]
   );
 
   const limpar = useCallback(() => {
@@ -313,6 +351,19 @@ export function AssistenteProvider({ children }: { children: React.ReactNode }) 
     }
   }, []);
 
+  // acumula a transcrição da ligação (com quem falou) pra virar memória
+  const registrar = useCallback((falante: "aluno" | "prof", texto: string) => {
+    if (!texto) return;
+    if (ultimoFalanteRef.current !== falante) {
+      transcricaoRef.current += `\n${falante === "aluno" ? "Aluno" : "Pyto"}: `;
+      ultimoFalanteRef.current = falante;
+    }
+    transcricaoRef.current += texto;
+    if (transcricaoRef.current.length > 5000) {
+      transcricaoRef.current = transcricaoRef.current.slice(-5000);
+    }
+  }, []);
+
   // ---- ligação ----
   const iniciarChamada = useCallback(
     async (comCamera = false) => {
@@ -320,6 +371,7 @@ export function AssistenteProvider({ children }: { children: React.ReactNode }) 
       setFalaProfessor("");
       setChamadaMsg(undefined);
       setMudo(false);
+      ultimoFalanteRef.current = null;
 
       const sess = new LiveSessao({
         onStatus: (s, msg) => {
@@ -331,24 +383,57 @@ export function AssistenteProvider({ children }: { children: React.ReactNode }) 
             setCamStream(null);
           }
         },
-        onFalaProfessor: (t) => setFalaProfessor((prev) => (prev + t).slice(-400)),
-        onCameraStream: (st) => {
+        onFalaProfessor: (t) => {
+          setFalaProfessor((prev) => (prev + t).slice(-400));
+          registrar("prof", t);
+        },
+        onFalaAluno: (t) => registrar("aluno", t),
+        onCameraStream: (st, frontal) => {
           setCamStream(st);
           setCameraLigada(!!st);
+          setCameraFrontal(frontal);
         },
         onToolCall: executarFerramenta,
       });
       sessaoRef.current = sess;
 
+      // memória: conversa anterior (voz) + chat escrito recente
+      let memoria = "";
+      try {
+        memoria = localStorage.getItem(CHAVE_MEMORIA) || "";
+      } catch {
+        /* noop */
+      }
+      const chatRecente = mensagensRef.current
+        .filter((m) => m.texto)
+        .slice(-6)
+        .map((m) => `${m.role === "user" ? "Aluno" : "Pyto"}: ${m.texto}`)
+        .join("\n");
+      const memoriaCompleta = [memoria, chatRecente && `No chat escrito:\n${chatRecente}`]
+        .filter(Boolean)
+        .join("\n\n");
+
       const ctx = coletarContexto(pathname || "/", concluidasRef.current);
-      await sess.iniciar(montarPersonaVoz(ctx), comCamera);
+      await sess.iniciar(montarPersonaVoz(ctx, memoriaCompleta), comCamera);
     },
-    [pathname, executarFerramenta]
+    [pathname, executarFerramenta, registrar]
   );
 
   const encerrarChamada = useCallback(async () => {
     await sessaoRef.current?.encerrar();
     sessaoRef.current = null;
+    // salva a conversa pra próxima ligação manter o contexto
+    const t = transcricaoRef.current.trim();
+    if (t) {
+      try {
+        const anterior = localStorage.getItem(CHAVE_MEMORIA) || "";
+        const junto = `${anterior}\n${t}`.slice(-5000);
+        localStorage.setItem(CHAVE_MEMORIA, junto);
+      } catch {
+        /* noop */
+      }
+    }
+    transcricaoRef.current = "";
     setChamadaStatus("idle");
     setCameraLigada(false);
     setCamStream(null);
@@ -401,13 +486,10 @@ export function AssistenteProvider({ children }: { children: React.ReactNode }) 
     };
     window.addEventListener("scroll", aoRolar, { passive: true });
     window.addEventListener("resize", aoRolar, { passive: true });
-    // rede de segurança: revê de tempos em tempos (pega animações que revelam conteúdo)
-    const intervalo = setInterval(enviarAgora, 4000);
 
     return () => {
       clearTimeout(inicial);
       if (timer) clearTimeout(timer);
-      clearInterval(intervalo);
       window.removeEventListener("scroll", aoRolar);
       window.removeEventListener("resize", aoRolar);
     };
@@ -452,6 +534,7 @@ export function AssistenteProvider({ children }: { children: React.ReactNode }) 
         chamadaMsg,
         mudo,
         cameraLigada,
+        cameraFrontal,
         camStream,
         falaProfessor,
         iniciarChamada,

@@ -1,4 +1,4 @@
-import { GoogleGenAI, Modality } from "@google/genai";
+import { GoogleGenAI } from "@google/genai";
 
 export const runtime = "nodejs";
 
@@ -25,18 +25,14 @@ export async function POST() {
     const ai = new GoogleGenAI({ apiKey });
     const expireTime = new Date(Date.now() + 25 * 60 * 1000).toISOString();
 
+    // Trava só o MODELO (segurança) e permite vários usos por token: assim o
+    // cliente pode reconectar (session resumption) e configurar a sessão (áudio,
+    // resumption handle) por conta própria sem o token bloquear.
     const token = await ai.authTokens.create({
       config: {
-        uses: 1,
+        uses: 10,
         expireTime,
-        liveConnectConstraints: {
-          model,
-          config: {
-            sessionResumption: {},
-            temperature: 0.85,
-            responseModalities: [Modality.AUDIO],
-          },
-        },
+        liveConnectConstraints: { model },
         httpOptions: { apiVersion: "v1alpha" },
       },
     });
