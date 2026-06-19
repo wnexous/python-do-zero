@@ -1,6 +1,9 @@
 import type { Metadata, Viewport } from "next";
 import { Fraunces, Geist, JetBrains_Mono } from "next/font/google";
+import { Analytics } from "@vercel/analytics/next";
 import { ProgressProvider } from "@/components/progress-provider";
+import { AssistenteProvider } from "@/components/assistente/provider";
+import { FloatingAssistant } from "@/components/assistente/floating-assistant";
 import "./globals.css";
 
 const sans = Geist({
@@ -57,7 +60,13 @@ export default function RootLayout({
         className="font-sans antialiased min-h-screen bg-background text-foreground"
         suppressHydrationWarning
       >
-        <ProgressProvider>{children}</ProgressProvider>
+        <ProgressProvider>
+          <AssistenteProvider>
+            {children}
+            <FloatingAssistant />
+          </AssistenteProvider>
+        </ProgressProvider>
+        <Analytics />
       </body>
     </html>
   );
