@@ -115,7 +115,11 @@ Corrija com carinho seguindo suas regras e devolva o JSON.`;
         generationConfig: {
           temperature: 0.6,
           responseMimeType: "application/json",
-          maxOutputTokens: 500,
+          maxOutputTokens: 1024,
+          // gemini-2.5-flash "pensa" por padrão e isso consome os tokens de saída,
+          // truncando o JSON. Pra uma correção simples a gente não precisa de
+          // raciocínio longo — desligar deixa rápido, barato e sem cortar a resposta.
+          thinkingConfig: { thinkingBudget: 0 },
         },
       }),
       // não deixa pendurar pra sempre
