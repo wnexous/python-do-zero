@@ -1,0 +1,172 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * Tema dark permanente, "editorial tech".
+ * Display: Fraunces (serifa com caráter)
+ * Body: Geist Sans
+ * Code: JetBrains Mono
+ * Accent: verde terminal hsl(95 70% 55%)
+ */
+
+@layer base {
+  :root {
+    --background: 0 0% 4%;
+    --foreground: 0 0% 93%;
+
+    --surface: 0 0% 7%;
+    --surface-foreground: 0 0% 93%;
+
+    --card: 0 0% 6%;
+    --card-foreground: 0 0% 93%;
+
+    --popover: 0 0% 8%;
+    --popover-foreground: 0 0% 93%;
+
+    --primary: 95 70% 55%;
+    --primary-foreground: 0 0% 5%;
+
+    --secondary: 0 0% 12%;
+    --secondary-foreground: 0 0% 93%;
+
+    --muted: 0 0% 11%;
+    --muted-foreground: 0 0% 62%;
+
+    --accent: 0 0% 14%;
+    --accent-foreground: 0 0% 93%;
+
+    --destructive: 0 72% 52%;
+    --destructive-foreground: 0 0% 98%;
+
+    --terminal: 95 70% 55%;
+    --terminal-foreground: 0 0% 5%;
+
+    --border: 0 0% 15%;
+    --input: 0 0% 13%;
+    --ring: 95 70% 55%;
+
+    --radius: 0.75rem;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  html {
+    color-scheme: dark;
+    -webkit-tap-highlight-color: transparent;
+    scroll-behavior: smooth;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-feature-settings: "rlig" 1, "calt" 1;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    /* evita zoom estranho de fonte no iOS ao girar a tela */
+    -webkit-text-size-adjust: 100%;
+    text-rendering: optimizeLegibility;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-serif), ui-serif, Georgia, serif;
+    font-weight: 400;
+    letter-spacing: -0.02em;
+  }
+
+  code, pre, kbd {
+    font-family: var(--font-mono), ui-monospace, monospace;
+  }
+
+  /* scrollbar discreta (desktop) */
+  ::-webkit-scrollbar {
+    width: 9px;
+    height: 9px;
+  }
+  ::-webkit-scrollbar-track {
+    background: hsl(var(--background));
+  }
+  ::-webkit-scrollbar-thumb {
+    background: hsl(var(--muted));
+    border-radius: 6px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--border));
+  }
+
+  ::selection {
+    background: hsl(var(--primary) / 0.3);
+    color: hsl(var(--foreground));
+  }
+}
+
+@layer components {
+  /* fundo de pontinhos sutil */
+  .dot-grid {
+    background-image: radial-gradient(
+      hsl(0 0% 100% / 0.05) 1px,
+      transparent 1px
+    );
+    background-size: 22px 22px;
+  }
+
+  /* texto de corpo das lições: confortável no celular */
+  .leitura {
+    @apply text-[16.5px] leading-[1.75] text-foreground/85;
+  }
+  .leitura p {
+    @apply my-4;
+  }
+  .leitura strong {
+    @apply font-semibold text-foreground;
+  }
+  .leitura em {
+    @apply italic text-foreground;
+  }
+  .leitura a {
+    @apply text-primary underline decoration-primary/40 underline-offset-4;
+  }
+  /* "code inline" estilo tecla */
+  .leitura code {
+    @apply rounded-md bg-secondary px-1.5 py-0.5 text-[0.85em] text-primary;
+  }
+  .leitura h3 {
+    @apply mb-2 mt-8 font-serif text-xl text-foreground;
+  }
+  .leitura ul {
+    @apply my-4 space-y-2 pl-1;
+  }
+  .leitura ul > li {
+    @apply relative pl-6;
+  }
+  .leitura ul > li::before {
+    content: "▸";
+    @apply absolute left-1 top-0 text-primary;
+  }
+  .leitura ol {
+    @apply my-4 list-decimal space-y-2 pl-6 marker:font-mono marker:text-primary;
+  }
+  .leitura blockquote {
+    @apply my-5 border-l-2 border-border pl-4 italic text-muted-foreground;
+  }
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+  .text-pretty {
+    text-wrap: pretty;
+  }
+  /* respeita quem pediu menos animação */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
