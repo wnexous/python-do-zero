@@ -105,17 +105,18 @@ export async function POST(req: Request) {
   });
 
   // rodadas de ferramentas já executadas nesta pergunta
+  // (no generateContent o casamento é por NOME — sem campo id, que é da Live API)
   for (const rod of corpo.continuacoes ?? []) {
     contents.push({
       role: "model",
       parts: (rod.calls ?? []).map((c) => ({
-        functionCall: { id: c.id, name: c.name, args: c.args ?? {} },
+        functionCall: { name: c.name, args: c.args ?? {} },
       })),
     });
     contents.push({
       role: "user",
       parts: (rod.results ?? []).map((r) => ({
-        functionResponse: { id: r.id, name: r.name, response: { result: r.result } },
+        functionResponse: { name: r.name, response: { result: r.result } },
       })),
     });
   }
@@ -145,8 +146,12 @@ export async function POST(req: Request) {
 
   if (!upstream.ok || !upstream.body) {
     const detalhe = await upstream.text().catch(() => "");
-    console.error("[chat] gemini erro", upstream.status, detalhe.slice(0, 300));
-    return new Response("A IA tropeçou aqui. Tenta de novo daqui a pouco.", { status: 502 });
+    console.error("[chat] gemini erro", upstream.status, detalhe.slice(0, 500));
+    const dbg =
+      req.headers.get("x-debug") === "1" ? ` [${upstream.status}] ${detalhe.slice(0, 400)}` : "";
+    return new Response("A IA tropeçou aqui. Tenta de novo daqui a pouco." + dbg, {
+      status: 502,
+    });
   }
 
   const stream = new ReadableStream<Uint8Array>({
