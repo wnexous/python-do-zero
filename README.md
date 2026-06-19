@@ -15,11 +15,11 @@ descontraído, do jeitinho de quem tá começando.
 - Ilustrações em **SVG/JSX animadas** feitas à mão
 - **Google Gemini** pra correção dos exercícios (rodando no servidor, via Route Handler)
 
-## 📚 Conteúdo (5 módulos, 13 lições)
+## 📚 Conteúdo (5 módulos, 14 lições)
 
 1. **Primeiros passos** — o que é programar, `print()`, variáveis, tipos
 2. **Texto e números** — strings, contas, `input()`
-3. **Tomar decisões** — booleanos, `if / elif / else`
+3. **Tomar decisões** — booleanos, `if / elif / else`, `match / case` (o "switch" do Python)
 4. **Repetir tarefas** — `while`, `for` e `range`
 5. **Guardar muitas coisas** — listas e tuplas
 

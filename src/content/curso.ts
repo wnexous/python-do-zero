@@ -107,6 +107,13 @@ export const CURSO: Modulo[] = [
         emoji: "🚦",
         duracao: "10 min",
       },
+      {
+        slug: "match-case",
+        titulo: "match / case — o switch do Python",
+        subtitulo: "Muita opção? Esse é mais limpo que um monte de elif",
+        emoji: "🔀",
+        duracao: "9 min",
+      },
     ],
   },
   {

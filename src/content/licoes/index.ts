@@ -9,6 +9,7 @@ import Numeros from "./numeros";
 import Input from "./input";
 import Booleanos from "./booleanos";
 import Condicionais from "./condicionais";
+import MatchCase from "./match-case";
 import While from "./while";
 import For from "./for";
 import Listas from "./listas";
@@ -25,6 +26,7 @@ export const LICOES: Record<string, ComponentType> = {
   input: Input,
   booleanos: Booleanos,
   condicionais: Condicionais,
+  "match-case": MatchCase,
   while: While,
   for: For,
   listas: Listas,
