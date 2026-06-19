@@ -22,7 +22,12 @@ type Contexto = {
   progresso?: string;
 };
 type Rodada = {
-  calls: Array<{ id?: string; name: string; args?: Record<string, unknown> }>;
+  calls: Array<{
+    id?: string;
+    name: string;
+    args?: Record<string, unknown>;
+    thoughtSignature?: string;
+  }>;
   results: Array<{ id?: string; name: string; result: string }>;
 };
 type Corpo = {
@@ -111,6 +116,8 @@ export async function POST(req: Request) {
       role: "model",
       parts: (rod.calls ?? []).map((c) => ({
         functionCall: { name: c.name, args: c.args ?? {} },
+        // Gemini 3 exige devolver a "assinatura de pensamento" da chamada
+        ...(c.thoughtSignature ? { thoughtSignature: c.thoughtSignature } : {}),
       })),
     });
     contents.push({
@@ -160,7 +167,11 @@ export async function POST(req: Request) {
       const decoder = new TextDecoder();
       const encoder = new TextEncoder();
       let buffer = "";
-      const calls: Array<{ id?: string; name: string; args: Record<string, unknown> }> = [];
+      const calls: Array<{
+        name: string;
+        args: Record<string, unknown>;
+        thoughtSignature?: string;
+      }> = [];
       const emitir = (obj: unknown) =>
         controller.enqueue(encoder.encode(JSON.stringify(obj) + "\n"));
       try {
@@ -183,9 +194,10 @@ export async function POST(req: Request) {
                   emitir({ type: "text", v: p.text });
                 if (p.functionCall?.name)
                   calls.push({
-                    id: p.functionCall.id,
                     name: p.functionCall.name,
                     args: p.functionCall.args ?? {},
+                    // assinatura de pensamento (Gemini 3) — precisa voltar na continuação
+                    thoughtSignature: p.thoughtSignature,
                   });
               }
             } catch {
