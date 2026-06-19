@@ -99,8 +99,17 @@ Resposta que o aluno escreveu:
 
 Corrija com carinho seguindo suas regras e devolva o JSON.`;
 
-  const model = process.env.GEMINI_MODEL || "gemini-2.5-flash";
+  const model = process.env.GEMINI_MODEL || "gemini-3.5-flash";
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
+
+  // O jeito de controlar o "pensamento" mudou entre as gerações:
+  //  - Gemini 3.x usa thinkingLevel ("low" | "medium" | "high")
+  //  - Gemini 2.x usa thinkingBudget (0 desliga). Passar o campo errado dá erro.
+  // Pra uma correção simples a gente quer o mínimo de raciocínio: rápido, barato
+  // e sem o "pensar" comer os tokens e truncar o JSON.
+  const thinkingConfig = /gemini-3/.test(model)
+    ? { thinkingLevel: "low" }
+    : { thinkingBudget: 0 };
 
   try {
     const r = await fetch(url, {
@@ -115,11 +124,10 @@ Corrija com carinho seguindo suas regras e devolva o JSON.`;
         generationConfig: {
           temperature: 0.6,
           responseMimeType: "application/json",
-          maxOutputTokens: 1024,
-          // gemini-2.5-flash "pensa" por padrão e isso consome os tokens de saída,
-          // truncando o JSON. Pra uma correção simples a gente não precisa de
-          // raciocínio longo — desligar deixa rápido, barato e sem cortar a resposta.
-          thinkingConfig: { thinkingBudget: 0 },
+          // folga generosa: mesmo com thinking "low" o raciocínio gasta tokens,
+          // então a gente garante espaço pro JSON final não ser cortado.
+          maxOutputTokens: 2048,
+          thinkingConfig,
         },
       }),
       // não deixa pendurar pra sempre

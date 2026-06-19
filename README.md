@@ -47,7 +47,7 @@ amigável de "ainda não configurada".
 2. Entre em **https://vercel.com/new** e **importe** o repositório.
 3. Em **Environment Variables**, adicione:
    - `GEMINI_API_KEY` = sua chave do AI Studio
-   - (opcional) `GEMINI_MODEL` = `gemini-2.5-flash`
+   - (opcional) `GEMINI_MODEL` = `gemini-3.5-flash`
 4. Clique em **Deploy**. Pronto — você recebe um link público `https://...vercel.app`.
 
 > Por que Vercel e não GitHub Pages? Porque a correção por IA precisa de um
