@@ -184,7 +184,9 @@ export class LiveSessao {
     const msg = m as {
       data?: string;
       serverContent?: {
-        modelTurn?: { parts?: Array<{ inlineData?: { data?: string }; text?: string }> };
+        modelTurn?: {
+          parts?: Array<{ inlineData?: { data?: string; mimeType?: string }; text?: string }>;
+        };
         outputTranscription?: { text?: string };
         interrupted?: boolean;
       };
@@ -194,14 +196,24 @@ export class LiveSessao {
     // o professor foi interrompido (aluno começou a falar) -> corta o áudio
     if (sc?.interrupted) this.reprodutor?.limpar();
 
-    // áudio pode vir em message.data ou nas parts do modelTurn
-    if (msg.data) this.reprodutor?.tocar(msg.data);
+    // IMPORTANTE: tocar o áudio UMA VEZ SÓ.
+    // No SDK do Gemini, msg.data e modelTurn.parts[].inlineData apontam pro
+    // MESMO áudio. Tocar os dois fazia cada pedaço soar duplicado (efeito de
+    // "2 vozes com delay") e o player ficava pra trás, causando cortes.
+    // Então: prioriza as parts; só usa msg.data se não houver part de áudio.
+    let tocou = false;
     const parts = sc?.modelTurn?.parts;
     if (parts) {
       for (const p of parts) {
-        if (p.inlineData?.data) this.reprodutor?.tocar(p.inlineData.data);
+        const d = p.inlineData?.data;
+        const mime = p.inlineData?.mimeType ?? "";
+        if (d && (mime === "" || mime.startsWith("audio"))) {
+          this.reprodutor?.tocar(d);
+          tocou = true;
+        }
       }
     }
+    if (!tocou && msg.data) this.reprodutor?.tocar(msg.data);
 
     // legenda do que o professor falou
     const t = sc?.outputTranscription?.text;
