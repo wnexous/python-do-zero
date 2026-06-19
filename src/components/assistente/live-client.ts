@@ -1,6 +1,7 @@
 "use client";
 
 import { GoogleGenAI, type Session } from "@google/genai";
+import { FERRAMENTAS } from "./ferramentas";
 
 // ============================================================================
 // Cliente da Gemini Live API (ligação ao vivo com o professor).
@@ -18,6 +19,8 @@ type Callbacks = {
   onStatus: (s: StatusChamada, msg?: string) => void;
   onFalaProfessor?: (texto: string) => void; // transcrição do que o professor diz
   onCameraStream?: (stream: MediaStream | null) => void;
+  // o professor chamou uma ferramenta (rolar, navegar, desenhar...) — execute e devolva o resultado
+  onToolCall?: (nome: string, args: Record<string, unknown>) => Promise<string>;
 };
 
 function bufParaBase64(buf: ArrayBuffer): string {
@@ -100,6 +103,7 @@ export class LiveSessao {
   private frameTimer: ReturnType<typeof setInterval> | null = null;
   private videoEl: HTMLVideoElement | null = null;
   private canvas: HTMLCanvasElement | null = null;
+  private facing: "user" | "environment" = "user";
   public mudo = false;
   public cameraLigada = false;
 
@@ -138,6 +142,7 @@ export class LiveSessao {
           inputAudioTranscription: {},
           outputAudioTranscription: {},
           systemInstruction: { parts: [{ text: systemInstruction }] },
+          tools: [{ functionDeclarations: FERRAMENTAS }],
         },
         callbacks: {
           onopen: () => {},
@@ -190,8 +195,16 @@ export class LiveSessao {
         outputTranscription?: { text?: string };
         interrupted?: boolean;
       };
+      toolCall?: {
+        functionCalls?: Array<{ id?: string; name?: string; args?: Record<string, unknown> }>;
+      };
     };
     const sc = msg.serverContent;
+
+    // o professor chamou uma ferramenta (rolar, navegar, quadro...)
+    if (msg.toolCall?.functionCalls?.length) {
+      void this.tratarFerramentas(msg.toolCall.functionCalls);
+    }
 
     // o professor foi interrompido (aluno começou a falar) -> corta o áudio
     if (sc?.interrupted) this.reprodutor?.limpar();
@@ -222,9 +235,10 @@ export class LiveSessao {
 
   async ligarCamera() {
     if (this.cameraLigada || !this.session) return;
+    this.facing = "user";
     try {
       this.camStream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "user", width: 640, height: 480 },
+        video: { facingMode: this.facing, width: 640, height: 480 },
       });
     } catch {
       return;
@@ -270,6 +284,56 @@ export class LiveSessao {
         video: { data: base64, mimeType: "image/jpeg" },
       });
     }
+  }
+
+  private async tratarFerramentas(
+    fcs: Array<{ id?: string; name?: string; args?: Record<string, unknown> }>
+  ) {
+    if (!this.session) return;
+    const respostas = [];
+    for (const fc of fcs) {
+      let resultado = "ok";
+      try {
+        if (this.cb.onToolCall && fc.name) {
+          resultado = await this.cb.onToolCall(fc.name, fc.args ?? {});
+        }
+      } catch {
+        resultado = "deu erro ao executar";
+      }
+      respostas.push({
+        id: fc.id,
+        name: fc.name,
+        response: { result: resultado },
+      });
+    }
+    try {
+      this.session.sendToolResponse({ functionResponses: respostas });
+    } catch (e) {
+      console.error("[live] sendToolResponse", e);
+    }
+  }
+
+  /** troca entre câmera frontal e traseira */
+  async virarCamera() {
+    if (!this.cameraLigada) return;
+    this.facing = this.facing === "user" ? "environment" : "user";
+    this.camStream?.getTracks().forEach((t) => t.stop());
+    try {
+      this.camStream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: this.facing, width: 640, height: 480 },
+      });
+    } catch {
+      // se a traseira não existir, volta pra frontal
+      this.facing = "user";
+      this.camStream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "user", width: 640, height: 480 },
+      });
+    }
+    if (this.videoEl) {
+      this.videoEl.srcObject = this.camStream;
+      await this.videoEl.play().catch(() => {});
+    }
+    this.cb.onCameraStream?.(this.camStream);
   }
 
   /** avisa o professor do que o aluno está vendo agora (sem forçar resposta) */

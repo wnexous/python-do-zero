@@ -16,23 +16,20 @@ import {
   MicOff,
   Video,
   VideoOff,
-  Minimize2,
+  SwitchCamera,
 } from "lucide-react";
 import { useAssistente } from "./provider";
 import { Markdown } from "./markdown";
+import { Quadro } from "./quadro";
 import { cn } from "@/lib/utils";
 
 export function FloatingAssistant() {
-  const { aberto, abrir, fechar, chamadaStatus } = useAssistente();
-  const [minChamada, setMinChamada] = useState(false);
-  const emChamada = chamadaStatus === "connecting" || chamadaStatus === "live";
-
-  // ao iniciar/erro de chamada, garante que o overlay apareça
-  useEffect(() => {
-    if (chamadaStatus === "connecting" || chamadaStatus === "erro")
-      setMinChamada(false);
-  }, [chamadaStatus]);
-
+  const { aberto, abrir, fechar, chamadaStatus, quadro, fecharQuadro } =
+    useAssistente();
+  const emChamada =
+    chamadaStatus === "connecting" ||
+    chamadaStatus === "live" ||
+    chamadaStatus === "erro";
   const mostrarLauncher = !aberto && !emChamada;
 
   return (
@@ -69,16 +66,12 @@ export function FloatingAssistant() {
         {aberto && !emChamada && <Painel onFechar={fechar} />}
       </AnimatePresence>
 
-      {/* ligação ao vivo */}
+      {/* dock da ligação ao vivo (deixa a página visível e interativa) */}
+      <AnimatePresence>{emChamada && <CallDock />}</AnimatePresence>
+
+      {/* quadro/lousa que o professor desenha */}
       <AnimatePresence>
-        {emChamada && !minChamada && (
-          <CallOverlay onMinimizar={() => setMinChamada(true)} />
-        )}
-      </AnimatePresence>
-      <AnimatePresence>
-        {emChamada && minChamada && (
-          <CallBar onExpandir={() => setMinChamada(false)} />
-        )}
+        {quadro && <Quadro dados={quadro} onFechar={fecharQuadro} />}
       </AnimatePresence>
     </>
   );
@@ -307,7 +300,8 @@ function Digitando() {
   );
 }
 
-function CallOverlay({ onMinimizar }: { onMinimizar: () => void }) {
+
+function CallDock() {
   const {
     chamadaStatus,
     chamadaMsg,
@@ -318,6 +312,7 @@ function CallOverlay({ onMinimizar }: { onMinimizar: () => void }) {
     encerrarChamada,
     toggleMudoChamada,
     toggleCameraChamada,
+    virarCamera,
     pegarContexto,
   } = useAssistente();
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -332,122 +327,98 @@ function CallOverlay({ onMinimizar }: { onMinimizar: () => void }) {
 
   return (
     <motion.div
-      initial={{ opacity: 0, y: 40, scale: 0.98 }}
-      animate={{ opacity: 1, y: 0, scale: 1 }}
-      exit={{ opacity: 0, y: 40, scale: 0.98 }}
-      transition={{ type: "spring", stiffness: 300, damping: 28 }}
-      className="fixed inset-x-0 bottom-0 z-[70] flex h-[88dvh] flex-col overflow-hidden rounded-t-2xl border border-border bg-gradient-to-b from-background to-[#0b0e0a] shadow-2xl sm:inset-x-auto sm:bottom-6 sm:right-6 sm:h-[640px] sm:max-h-[85dvh] sm:w-[400px] sm:rounded-2xl"
+      initial={{ y: 120, opacity: 0 }}
+      animate={{ y: 0, opacity: 1 }}
+      exit={{ y: 120, opacity: 0 }}
+      transition={{ type: "spring", stiffness: 320, damping: 30 }}
+      className="fixed inset-x-0 bottom-0 z-[70] border-t border-primary/30 bg-background/95 backdrop-blur-md"
+      style={{ paddingBottom: "max(0.75rem, env(safe-area-inset-bottom))" }}
     >
-      {/* cabeçalho */}
-      <header className="flex items-center gap-3 px-4 py-3">
-        <span className="flex items-center gap-1.5 text-xs font-semibold">
-          <span
-            className={cn(
-              "size-2 rounded-full",
-              erro ? "bg-destructive" : conectando ? "bg-sun" : "bg-primary"
-            )}
-          />
-          <span className={erro ? "text-destructive" : "text-foreground"}>
-            {erro ? "falhou" : conectando ? "conectando..." : "ao vivo"}
-          </span>
-        </span>
-        <span className="truncate text-xs text-muted-foreground">
-          {ctx.licaoTitulo ?? "Python do Zero"}
-        </span>
-        <button
-          onClick={onMinimizar}
-          aria-label="Minimizar ligação"
-          className="ml-auto flex size-9 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-        >
-          <Minimize2 className="size-[18px]" />
-        </button>
-      </header>
-
-      {/* palco */}
-      <div className="relative flex flex-1 flex-col items-center justify-center gap-6 px-6">
-        {/* avatar pulsante do professor */}
-        <div className="relative flex items-center justify-center">
-          {!erro && (
-            <motion.span
-              className="absolute rounded-full bg-primary/20"
-              style={{ width: 150, height: 150 }}
-              animate={{ scale: [1, 1.25, 1], opacity: [0.5, 0.1, 0.5] }}
-              transition={{ duration: 2, repeat: Infinity }}
-            />
-          )}
-          <div className="relative flex size-28 items-center justify-center rounded-full bg-primary/15 text-6xl">
-            🐍
-          </div>
-        </div>
-
-        <div className="text-center">
-          <p className="font-serif text-2xl text-foreground">Professor Pyto</p>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {erro
-              ? chamadaMsg ?? "Algo deu errado."
-              : conectando
-                ? "abrindo a ligação..."
-                : "tô te ouvindo — pode falar! 🎤"}
-          </p>
-        </div>
-
-        {/* prévia da câmera */}
-        {cameraLigada && camStream && (
-          <motion.video
-            ref={videoRef}
-            autoPlay
-            playsInline
-            muted
-            initial={{ opacity: 0, scale: 0.9 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="absolute bottom-2 right-2 h-32 w-24 -scale-x-100 rounded-xl border border-border object-cover shadow-lg"
-          />
-        )}
-
-        {/* legenda do que o professor fala */}
-        {!erro && falaProfessor && (
-          <div className="absolute inset-x-4 bottom-2 rounded-xl bg-background/70 p-3 backdrop-blur">
-            <p className="line-clamp-3 text-center text-sm text-foreground/90">
-              {falaProfessor}
+      <div className="mx-auto max-w-2xl px-3 pt-2.5">
+        {/* linha de status + legenda + câmera */}
+        <div className="flex items-start gap-3">
+          <div className="min-w-0 flex-1">
+            <p className="flex items-center gap-1.5 text-xs font-semibold">
+              <span
+                className={cn(
+                  "size-2 rounded-full",
+                  erro
+                    ? "bg-destructive"
+                    : conectando
+                      ? "bg-sun"
+                      : "bg-primary"
+                )}
+              />
+              <motion.span
+                animate={!erro && !conectando ? { opacity: [1, 0.5, 1] } : {}}
+                transition={{ duration: 1.4, repeat: Infinity }}
+                className={erro ? "text-destructive" : "text-foreground"}
+              >
+                {erro ? "ligação falhou" : conectando ? "conectando..." : "Pyto ao vivo 🐍"}
+              </motion.span>
+              <span className="truncate text-muted-foreground">
+                · {ctx.licaoTitulo ?? "Python do Zero"}
+              </span>
+            </p>
+            <p className="mt-1 line-clamp-2 min-h-[2.5em] text-[13px] leading-snug text-foreground/80">
+              {erro
+                ? chamadaMsg ?? "Algo deu errado."
+                : conectando
+                  ? "abrindo a ligação, libera o microfone 🎤"
+                  : falaProfessor || "tô te ouvindo — pode falar e me pedir o que quiser 😊"}
             </p>
           </div>
-        )}
-      </div>
+          {cameraLigada && camStream && (
+            <video
+              ref={videoRef}
+              autoPlay
+              playsInline
+              muted
+              className="h-16 w-12 -scale-x-100 rounded-lg border border-border object-cover"
+            />
+          )}
+        </div>
 
-      {/* controles */}
-      <div
-        className="flex items-center justify-center gap-4 border-t border-border/60 px-4 py-5"
-        style={{ paddingBottom: "max(1.25rem, env(safe-area-inset-bottom))" }}
-      >
-        {!erro && (
-          <>
-            <CtrlBtn
-              ativo={!mudo}
-              onClick={toggleMudoChamada}
-              titulo={mudo ? "Ativar microfone" : "Mutar"}
-            >
-              {mudo ? <MicOff className="size-6" /> : <Mic className="size-6" />}
-            </CtrlBtn>
-            <CtrlBtn
-              ativo={cameraLigada}
-              onClick={toggleCameraChamada}
-              titulo={cameraLigada ? "Desligar câmera" : "Ligar câmera"}
-            >
-              {cameraLigada ? (
-                <Video className="size-6" />
-              ) : (
-                <VideoOff className="size-6" />
+        {/* controles */}
+        <div className="mt-2 flex items-center justify-center gap-2.5 pb-1">
+          {!erro && (
+            <>
+              <CtrlBtn
+                ativo={!mudo}
+                onClick={toggleMudoChamada}
+                titulo={mudo ? "Ativar microfone" : "Mutar microfone"}
+              >
+                {mudo ? <MicOff className="size-5" /> : <Mic className="size-5" />}
+              </CtrlBtn>
+              <CtrlBtn
+                ativo={cameraLigada}
+                onClick={toggleCameraChamada}
+                titulo={cameraLigada ? "Desligar câmera" : "Ligar câmera"}
+              >
+                {cameraLigada ? (
+                  <Video className="size-5" />
+                ) : (
+                  <VideoOff className="size-5" />
+                )}
+              </CtrlBtn>
+              {cameraLigada && (
+                <CtrlBtn ativo={false} onClick={virarCamera} titulo="Virar câmera">
+                  <SwitchCamera className="size-5" />
+                </CtrlBtn>
               )}
-            </CtrlBtn>
-          </>
-        )}
-        <button
-          onClick={encerrarChamada}
-          aria-label="Encerrar ligação"
-          className="flex size-16 items-center justify-center rounded-full bg-destructive text-white shadow-lg shadow-destructive/30 transition-transform active:scale-90"
-        >
-          <PhoneOff className="size-7" />
-        </button>
+            </>
+          )}
+          <button
+            onClick={encerrarChamada}
+            aria-label="Encerrar ligação"
+            className="flex h-12 items-center gap-2 rounded-full bg-destructive px-5 text-white shadow-md shadow-destructive/30 transition-transform active:scale-90"
+          >
+            <PhoneOff className="size-5" />
+            <span className="text-sm font-semibold">
+              {erro ? "Fechar" : "Encerrar"}
+            </span>
+          </button>
+        </div>
       </div>
     </motion.div>
   );
@@ -470,7 +441,7 @@ function CtrlBtn({
       aria-label={titulo}
       title={titulo}
       className={cn(
-        "flex size-14 items-center justify-center rounded-full border transition-all active:scale-90",
+        "flex size-12 items-center justify-center rounded-full border transition-all active:scale-90",
         ativo
           ? "border-primary/40 bg-primary/15 text-primary"
           : "border-border bg-secondary text-muted-foreground"
@@ -478,37 +449,5 @@ function CtrlBtn({
     >
       {children}
     </button>
-  );
-}
-
-function CallBar({ onExpandir }: { onExpandir: () => void }) {
-  const { chamadaStatus, encerrarChamada } = useAssistente();
-  const conectando = chamadaStatus === "connecting";
-  return (
-    <motion.div
-      initial={{ y: 60, opacity: 0 }}
-      animate={{ y: 0, opacity: 1 }}
-      exit={{ y: 60, opacity: 0 }}
-      className="fixed bottom-4 left-1/2 z-[70] flex -translate-x-1/2 items-center gap-3 rounded-full border border-primary/40 bg-background/90 py-2 pl-4 pr-2 shadow-lg backdrop-blur"
-      style={{ marginBottom: "env(safe-area-inset-bottom, 0)" }}
-    >
-      <button onClick={onExpandir} className="flex items-center gap-2">
-        <motion.span
-          className="size-2.5 rounded-full bg-primary"
-          animate={{ opacity: [1, 0.3, 1] }}
-          transition={{ duration: 1.2, repeat: Infinity }}
-        />
-        <span className="text-sm font-medium text-foreground">
-          {conectando ? "conectando..." : "Ligação com Pyto"} 🐍
-        </span>
-      </button>
-      <button
-        onClick={encerrarChamada}
-        aria-label="Encerrar"
-        className="flex size-9 items-center justify-center rounded-full bg-destructive text-white transition-transform active:scale-90"
-      >
-        <PhoneOff className="size-[18px]" />
-      </button>
-    </motion.div>
   );
 }

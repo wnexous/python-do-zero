@@ -123,6 +123,19 @@ export function coletarVisivel(pathname: string): string {
       if (texto.length > 1800) texto = texto.slice(0, 1800) + "…";
       partes.push(`Conteúdo visível na tela agora:\n"""${texto}"""`);
     }
+
+    // o que o aluno digitou num exercício visível
+    const areas = Array.from(
+      document.querySelectorAll("textarea")
+    ) as HTMLTextAreaElement[];
+    for (const ta of areas) {
+      const r = ta.getBoundingClientRect();
+      const dentro = r.bottom > 0 && r.top < vh;
+      const val = ta.value?.trim();
+      if (dentro && val) {
+        partes.push(`[RESPOSTA DO EXERCÍCIO] O aluno digitou:\n"""${val.slice(0, 600)}"""`);
+      }
+    }
   }
 
   return partes.join("\n");

@@ -8,10 +8,17 @@ import {
   useRef,
   useState,
 } from "react";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useProgresso } from "@/components/progress-provider";
 import { coletarContexto, coletarVisivel, type ContextoPagina } from "./contexto";
 import { LiveSessao, type StatusChamada } from "./live-client";
+import {
+  rolarPagina,
+  irParaSecao,
+  destacarTrecho,
+  acharSlugLicao,
+} from "./page-controller";
+import { type QuadroDados } from "./quadro";
 
 export type ChatMsg = {
   id: string;
@@ -42,6 +49,9 @@ type Ctx = {
   encerrarChamada: () => Promise<void>;
   toggleMudoChamada: () => void;
   toggleCameraChamada: () => Promise<void>;
+  virarCamera: () => Promise<void>;
+  quadro: QuadroDados | null;
+  fecharQuadro: () => void;
 };
 
 const AssistenteCtx = createContext<Ctx | null>(null);
@@ -59,6 +69,13 @@ function montarPersonaVoz(ctx: ContextoPagina): string {
     `- VISÃO DA TELA: você recebe, em tempo real, mensagens começando com "[TELA AGORA]" que descrevem EXATAMENTE o que está visível na tela do aluno neste momento (a seção e o texto que ele está lendo). Elas se atualizam quando ele rola a página ou troca de lição.`,
     `- Quando o aluno perguntar algo como "o que está na minha tela?", "o que tô vendo?" ou "me explica isso aqui", você SIM tem essa informação: responda com base na ÚLTIMA mensagem "[TELA AGORA]" que recebeu. NUNCA diga que não sabe o que está na tela.`,
     `- Nunca leia as mensagens "[TELA AGORA]" em voz alta nem comente que recebeu uma — use-as só como seus olhos.`,
+    `- Você também recebe "[ALUNO SUBLINHOU] ..." quando ele seleciona um texto na tela (é o que ele quer entender) e "[RESPOSTA DO EXERCÍCIO] ..." com o que ele digitou num exercício. Se ele perguntar "tá certo?", avalie essa resposta com carinho e ajude a corrigir.`,
+    `\nVOCÊ TEM PODERES NA TELA DO ALUNO (ferramentas/tools). Use-os de verdade, com naturalidade, pra ensinar melhor — não só fale, AJA:`,
+    `- rolar_pagina e ir_para_secao: role a tela e leve o aluno até a parte que você está explicando.`,
+    `- destacar_trecho: sublinhe na tela a frase/palavra exata que você está comentando ("olha bem AQUI ó").`,
+    `- ir_para_licao: leve o aluno pra outra lição quando o assunto estiver melhor explicado lá, ou se ele pedir.`,
+    `- abrir_quadro + quadro_fluxo / quadro_passos / quadro_codigo / quadro_comparacao: abra uma lousa e DESENHE pra explicar de forma visual (fluxogramas, passo a passo, exemplos de código, comparações). Use bastante isso — é muito mais didático que só falar. Feche com fechar_quadro quando não precisar mais.`,
+    `- Seja proativo com as ferramentas: ao explicar um conceito, já destaque na tela ou desenhe um quadro. Mas continue falando normalmente enquanto faz isso.`,
   ];
   if (ctx.licaoTitulo) partes.push(`\nAgora o aluno está na lição: "${ctx.licaoTitulo}".`);
   if (ctx.secaoVisivel) partes.push(`Seção visível na tela: "${ctx.secaoVisivel}".`);
@@ -77,6 +94,7 @@ function novoId() {
 
 export function AssistenteProvider({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const router = useRouter();
   const { concluidas } = useProgresso();
   const concluidasRef = useRef(0);
   concluidasRef.current = concluidas.size;
@@ -94,6 +112,63 @@ export function AssistenteProvider({ children }: { children: React.ReactNode }) 
   const [cameraLigada, setCameraLigada] = useState(false);
   const [camStream, setCamStream] = useState<MediaStream | null>(null);
   const [falaProfessor, setFalaProfessor] = useState("");
+  const [quadro, setQuadro] = useState<QuadroDados | null>(null);
+
+  // executa as ferramentas que o professor chama durante a ligação
+  const executarFerramenta = useCallback(
+    async (nome: string, args: Record<string, unknown>): Promise<string> => {
+      const s = (k: string) => String(args[k] ?? "");
+      const arr = (k: string) =>
+        Array.isArray(args[k]) ? (args[k] as unknown[]).map((x) => String(x)) : [];
+      switch (nome) {
+        case "rolar_pagina":
+          return rolarPagina(s("direcao") || "baixo");
+        case "ir_para_secao":
+          return irParaSecao(s("secao"));
+        case "destacar_trecho":
+          return destacarTrecho(s("trecho"));
+        case "ir_para_licao": {
+          const slug = acharSlugLicao(s("licao"));
+          if (!slug) return "não achei essa lição no curso";
+          router.push(`/licao/${slug}`);
+          return `levei o aluno pra lição ${slug}`;
+        }
+        case "abrir_quadro":
+          setQuadro({ tipo: "vazio", titulo: s("titulo") || "Quadro" });
+          return "quadro aberto";
+        case "quadro_fluxo":
+          setQuadro({ tipo: "fluxo", titulo: s("titulo"), passos: arr("passos") });
+          return "fluxograma desenhado";
+        case "quadro_passos":
+          setQuadro({ tipo: "passos", titulo: s("titulo"), passos: arr("passos") });
+          return "passos mostrados";
+        case "quadro_codigo":
+          setQuadro({
+            tipo: "codigo",
+            titulo: s("titulo"),
+            codigo: s("codigo"),
+            legenda: s("legenda"),
+          });
+          return "código mostrado no quadro";
+        case "quadro_comparacao":
+          setQuadro({
+            tipo: "comparacao",
+            titulo: s("titulo"),
+            tituloA: s("tituloA"),
+            itensA: arr("itensA"),
+            tituloB: s("tituloB"),
+            itensB: arr("itensB"),
+          });
+          return "comparação mostrada";
+        case "fechar_quadro":
+          setQuadro(null);
+          return "quadro fechado";
+        default:
+          return "não conheço essa ferramenta";
+      }
+    },
+    [router]
+  );
 
   // carrega conversa salva
   useEffect(() => {
@@ -261,13 +336,14 @@ export function AssistenteProvider({ children }: { children: React.ReactNode }) 
           setCamStream(st);
           setCameraLigada(!!st);
         },
+        onToolCall: executarFerramenta,
       });
       sessaoRef.current = sess;
 
       const ctx = coletarContexto(pathname || "/", concluidasRef.current);
       await sess.iniciar(montarPersonaVoz(ctx), comCamera);
     },
-    [pathname]
+    [pathname, executarFerramenta]
   );
 
   const encerrarChamada = useCallback(async () => {
@@ -291,6 +367,12 @@ export function AssistenteProvider({ children }: { children: React.ReactNode }) 
     if (sess.cameraLigada) sess.desligarCamera();
     else await sess.ligarCamera();
   }, []);
+
+  const virarCamera = useCallback(async () => {
+    await sessaoRef.current?.virarCamera();
+  }, []);
+
+  const fecharQuadro = useCallback(() => setQuadro(null), []);
 
   // VISÃO DA TELA EM TEMPO REAL durante a ligação:
   // manda pro professor o que está visível no viewport, atualizando quando o
@@ -331,6 +413,30 @@ export function AssistenteProvider({ children }: { children: React.ReactNode }) 
     };
   }, [pathname, chamadaStatus]);
 
+  // quando o aluno SUBLINHA/seleciona um texto, conta pro professor
+  useEffect(() => {
+    if (chamadaStatus !== "live") return;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let ultimo = "";
+    const aoSelecionar = () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        const sel = window.getSelection?.()?.toString().trim() ?? "";
+        if (sel.length >= 4 && sel !== ultimo) {
+          ultimo = sel;
+          sessaoRef.current?.enviarContexto(
+            `[ALUNO SUBLINHOU] "${sel.slice(0, 400)}"`
+          );
+        }
+      }, 600);
+    };
+    document.addEventListener("selectionchange", aoSelecionar);
+    return () => {
+      if (timer) clearTimeout(timer);
+      document.removeEventListener("selectionchange", aoSelecionar);
+    };
+  }, [chamadaStatus]);
+
   return (
     <AssistenteCtx.Provider
       value={{
@@ -352,6 +458,9 @@ export function AssistenteProvider({ children }: { children: React.ReactNode }) 
         encerrarChamada,
         toggleMudoChamada,
         toggleCameraChamada,
+        virarCamera,
+        quadro,
+        fecharQuadro,
       }}
     >
       {children}
