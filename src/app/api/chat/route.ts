@@ -154,9 +154,7 @@ export async function POST(req: Request) {
   if (!upstream.ok || !upstream.body) {
     const detalhe = await upstream.text().catch(() => "");
     console.error("[chat] gemini erro", upstream.status, detalhe.slice(0, 500));
-    const dbg =
-      req.headers.get("x-debug") === "1" ? ` [${upstream.status}] ${detalhe.slice(0, 400)}` : "";
-    return new Response("A IA tropeçou aqui. Tenta de novo daqui a pouco." + dbg, {
+    return new Response("A IA tropeçou aqui. Tenta de novo daqui a pouco.", {
       status: 502,
     });
   }
