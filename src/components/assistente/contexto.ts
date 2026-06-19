@@ -64,3 +64,66 @@ export function coletarContexto(
 
   return ctx;
 }
+
+/**
+ * Descreve EXATAMENTE o que está no viewport do aluno neste instante
+ * (título da lição + seção atual + o texto dos blocos visíveis na tela).
+ * É recalculado a cada scroll/troca de página pra alimentar o professor ao vivo.
+ */
+export function coletarVisivel(pathname: string): string {
+  const partes: string[] = [];
+
+  const m = pathname.match(/\/licao\/([^/?#]+)/);
+  const slug = m?.[1];
+  if (slug) {
+    const meta = getLicaoMeta(slug);
+    const mod = getModuloDaLicao(slug);
+    if (meta)
+      partes.push(`Lição: "${meta.titulo}"${mod ? ` (Módulo ${mod.id})` : ""}.`);
+  } else if (pathname === "/") {
+    partes.push("Tela: página inicial (lista dos módulos e lições).");
+  }
+
+  if (typeof document !== "undefined") {
+    const vh = window.innerHeight;
+
+    const article = document.querySelector("article.leitura") as HTMLElement | null;
+    if (article) {
+      const headings = Array.from(
+        article.querySelectorAll("h1, h2")
+      ) as HTMLElement[];
+      let atual: HTMLElement | null = headings[0] ?? null;
+      for (const h of headings) {
+        if (h.getBoundingClientRect().top <= vh * 0.4) atual = h;
+        else break;
+      }
+      const sec = atual?.textContent?.trim();
+      if (sec) partes.push(`Seção em foco agora: "${sec}".`);
+    }
+
+    // blocos realmente dentro do viewport
+    const blocos = Array.from(
+      document.querySelectorAll(
+        "article.leitura h1, article.leitura h2, article.leitura h3, article.leitura p, article.leitura li, article.leitura pre"
+      )
+    ) as HTMLElement[];
+    const visiveis: string[] = [];
+    for (const el of blocos) {
+      const r = el.getBoundingClientRect();
+      const dentro = r.bottom > 0 && r.top < vh;
+      if (!dentro) continue;
+      const txt = el.innerText?.trim();
+      if (txt) visiveis.push(el.tagName === "PRE" ? `[código]\n${txt}` : txt);
+    }
+
+    if (visiveis.length === 0 && pathname === "/") {
+      partes.push("O aluno está vendo a tela inicial com os módulos do curso.");
+    } else if (visiveis.length > 0) {
+      let texto = visiveis.join("\n");
+      if (texto.length > 1800) texto = texto.slice(0, 1800) + "…";
+      partes.push(`Conteúdo visível na tela agora:\n"""${texto}"""`);
+    }
+  }
+
+  return partes.join("\n");
+}

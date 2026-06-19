@@ -10,7 +10,7 @@ import {
 } from "react";
 import { usePathname } from "next/navigation";
 import { useProgresso } from "@/components/progress-provider";
-import { coletarContexto, type ContextoPagina } from "./contexto";
+import { coletarContexto, coletarVisivel, type ContextoPagina } from "./contexto";
 import { LiveSessao, type StatusChamada } from "./live-client";
 
 export type ChatMsg = {
@@ -56,7 +56,9 @@ function montarPersonaVoz(ctx: ContextoPagina): string {
     `- Explique do jeito mais simples possível, com analogias do dia a dia. Faça pausas, pergunte se ele entendeu.`,
     `- Fique no nível básico (print, variáveis, tipos, strings, números, input, if, match/case, loops, listas, tuplas).`,
     `- Se o aluno mostrar a CÂMERA (um código no papel/tela, um caderno), comente o que está vendo e ajude.`,
-    `- Você recebe atualizações de contexto entre parênteses dizendo o que ele está vendo na tela. Use isso, mas não leia em voz alta.`,
+    `- VISÃO DA TELA: você recebe, em tempo real, mensagens começando com "[TELA AGORA]" que descrevem EXATAMENTE o que está visível na tela do aluno neste momento (a seção e o texto que ele está lendo). Elas se atualizam quando ele rola a página ou troca de lição.`,
+    `- Quando o aluno perguntar algo como "o que está na minha tela?", "o que tô vendo?" ou "me explica isso aqui", você SIM tem essa informação: responda com base na ÚLTIMA mensagem "[TELA AGORA]" que recebeu. NUNCA diga que não sabe o que está na tela.`,
+    `- Nunca leia as mensagens "[TELA AGORA]" em voz alta nem comente que recebeu uma — use-as só como seus olhos.`,
   ];
   if (ctx.licaoTitulo) partes.push(`\nAgora o aluno está na lição: "${ctx.licaoTitulo}".`);
   if (ctx.secaoVisivel) partes.push(`Seção visível na tela: "${ctx.secaoVisivel}".`);
@@ -290,14 +292,43 @@ export function AssistenteProvider({ children }: { children: React.ReactNode }) 
     else await sess.ligarCamera();
   }, []);
 
-  // ao trocar de página durante a ligação, avisa o professor do novo contexto
+  // VISÃO DA TELA EM TEMPO REAL durante a ligação:
+  // manda pro professor o que está visível no viewport, atualizando quando o
+  // aluno rola a página ou troca de lição (com dedupe pra não repetir igual).
   useEffect(() => {
-    if (chamadaStatus !== "live" || !sessaoRef.current) return;
-    const ctx = coletarContexto(pathname || "/", concluidasRef.current);
-    const resumo = `(Contexto atualizado: o aluno agora está vendo "${
-      ctx.licaoTitulo ?? "a página inicial"
-    }"${ctx.secaoVisivel ? `, na seção "${ctx.secaoVisivel}"` : ""}.)`;
-    sessaoRef.current.enviarContexto(resumo);
+    if (chamadaStatus !== "live") return;
+
+    let ultimo = "";
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    const enviarAgora = () => {
+      const sess = sessaoRef.current;
+      if (!sess) return;
+      const desc = coletarVisivel(pathname || "/");
+      if (!desc || desc === ultimo) return;
+      ultimo = desc;
+      sess.enviarContexto(`[TELA AGORA]\n${desc}`);
+    };
+
+    // manda o estado inicial assim que a ligação fica de pé
+    const inicial = setTimeout(enviarAgora, 300);
+
+    const aoRolar = () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(enviarAgora, 600);
+    };
+    window.addEventListener("scroll", aoRolar, { passive: true });
+    window.addEventListener("resize", aoRolar, { passive: true });
+    // rede de segurança: revê de tempos em tempos (pega animações que revelam conteúdo)
+    const intervalo = setInterval(enviarAgora, 4000);
+
+    return () => {
+      clearTimeout(inicial);
+      if (timer) clearTimeout(timer);
+      clearInterval(intervalo);
+      window.removeEventListener("scroll", aoRolar);
+      window.removeEventListener("resize", aoRolar);
+    };
   }, [pathname, chamadaStatus]);
 
   return (
